@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase, type CheckIn, type Staff } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { format, startOfDay, endOfDay, parseISO } from 'date-fns';
-import { Calendar, Users, Clock, UserCheck, Database, Plus, Search, Filter, ArrowUpDown, Moon, LogOut, Building2 } from 'lucide-react';
+import { Calendar, Users, Clock, UserCheck, Database, Plus, Search, Filter, Moon, LogOut, Building2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 export function AdminDashboard() {
@@ -16,6 +16,13 @@ export function AdminDashboard() {
   const [isLoadingStaff, setIsLoadingStaff] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'staff' | 'checkins'>('staff');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    lab: '',
+    status: '',
+    tag: ''
+  });
+  const filterRef = useRef<HTMLDivElement>(null);
 
   const fetchCheckIns = async (date: string) => {
     setIsLoadingCheckIns(true);
@@ -117,6 +124,20 @@ export function AdminDashboard() {
     fetchStaff();
   }, []);
 
+  // Close filter dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setShowFilters(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   useEffect(() => {
     // Set up real-time subscription for check-ins
     const subscription = supabase
@@ -149,12 +170,23 @@ export function AdminDashboard() {
     navigate('/');
   };
 
-  // Filter staff based on search term
-  const filteredStaff = staff.filter(member =>
-    member.staffname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.tag.toString().includes(searchTerm)
-  );
+  // Filter staff based on search term and filters
+  const filteredStaff = staff.filter(member => {
+    const matchesSearch = member.staffname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.tag.toString().includes(searchTerm);
+    
+    const matchesLab = !filters.lab || member.lab.toLowerCase().includes(filters.lab.toLowerCase());
+    const matchesTag = !filters.tag || member.tag.toString().includes(filters.tag);
+    
+    // For status filter, check if staff has checked in today
+    const hasCheckedIn = checkedInStaffIds.has(member.staffid);
+    const matchesStatus = !filters.status || 
+      (filters.status === 'checked-in' && hasCheckedIn) ||
+      (filters.status === 'not-checked-in' && !hasCheckedIn);
+    
+    return matchesSearch && matchesLab && matchesTag && matchesStatus;
+  });
 
   return (
     <div className="min-h-screen bg-dark-950">
@@ -257,14 +289,69 @@ export function AdminDashboard() {
                   Today's Check-ins ({checkedInToday})
                 </button>
               </div>
-              <button className="flex items-center space-x-2 px-4 py-3 bg-dark-800 border border-dark-700 text-gray-300 rounded-lg hover:bg-dark-700 transition-colors">
-                <Filter size={18} />
-                <span>Filters</span>
-              </button>
-              <button className="flex items-center space-x-2 px-4 py-3 bg-dark-800 border border-dark-700 text-gray-300 rounded-lg hover:bg-dark-700 transition-colors">
-                <ArrowUpDown size={18} />
-                <span>Ascending</span>
-              </button>
+              <div className="relative" ref={filterRef}>
+                <button 
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="flex items-center space-x-2 px-4 py-3 bg-dark-800 border border-dark-700 text-gray-300 rounded-lg hover:bg-dark-700 transition-colors"
+                >
+                  <Filter size={18} />
+                  <span>Filters</span>
+                </button>
+                
+                {showFilters && (
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-dark-900 border border-dark-700 rounded-lg shadow-lg z-50">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-white font-medium">Filter Options</h3>
+                        <button 
+                          onClick={() => setFilters({ lab: '', status: '', tag: '' })}
+                          className="text-sm text-primary-400 hover:text-primary-300 transition-colors"
+                        >
+                          Clear All
+                        </button>
+                      </div>
+                      
+                      {/* Lab Filter */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Lab</label>
+                        <input
+                          type="text"
+                          placeholder="Filter by lab..."
+                          value={filters.lab}
+                          onChange={(e) => setFilters({ ...filters, lab: e.target.value })}
+                          className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-md text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 text-sm"
+                        />
+                      </div>
+                      
+                      {/* Tag Filter */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Tag</label>
+                        <input
+                          type="text"
+                          placeholder="Filter by tag..."
+                          value={filters.tag}
+                          onChange={(e) => setFilters({ ...filters, tag: e.target.value })}
+                          className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-md text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 text-sm"
+                        />
+                      </div>
+                      
+                      {/* Status Filter */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Status</label>
+                        <select
+                          value={filters.status}
+                          onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                          className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-md text-white focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 text-sm"
+                        >
+                          <option value="">All Status</option>
+                          <option value="checked-in">Checked In</option>
+                          <option value="not-checked-in">Not Checked In</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <Link
                 to="/form"
                 className="flex items-center space-x-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
@@ -384,7 +471,7 @@ export function AdminDashboard() {
                   <div className="col-span-2 text-left">Check-in Time</div>
                   <div className="col-span-2 text-left">Date</div>
                   <div className="col-span-2 text-left">Status</div>
-                  <div className="flex items-center space-x-2 ml-4">
+                <div className="flex items-center space-x-2 ml-4">
                   <Calendar size={16} className="text-gray-400" />
                   <input
                     type="date"
